@@ -1,4 +1,4 @@
-## C700RT06-BL
+## Cuayo Cuayo :p
 
 Custom allocator dengan `brk()` dan guard `futex()`
 <br>
