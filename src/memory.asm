@@ -15,6 +15,9 @@ VERIFICATE_BLOCK          equ 0xCCCCCC00
 FLAGS_CHUNK_FREE          equ 1
 FLAGS_CHUNK_USED          equ 0
 
+FLAGS_ARENA_FREE          equ 1 
+FLAGS_ARENA_USED          equ 0 
+
 EXPAND_ERR_VALUE          equ -1 
 
 SYS_munmap                equ 11
@@ -30,11 +33,16 @@ PROT_EXEC                 equ 4
 MAP_PRIVATE               equ 0x02 
 MAP_ANONYMOUS             equ 0x22
 
+ARENA_INIT_PAGE           equ 1024 * 8
+
 struc ARENA_METADATA 
     .size_arena:  resq 1
     .next_arena:  resq 1 
-    .flags_arena: resq 1 
-    .hash_arena:  resq 1
+    .flags_arena: resd 1 
+    .hash_arena:  resd 1
+
+    .static_head_multiarena: resq 1 
+    .static_tail_multiarena: resq 1
 endstruc 
 
 struc CHUNK_METADATA
@@ -204,9 +212,20 @@ alloc:
   ret ; return if block available 
 
 .CREATE_NEW_CHUNK:
+  
+  push rbx 
+  lea rdi,[rel static_mutex_guard]
+  call mutex_unlock
+  pop rbx 
 
+  mov rdi,rbx 
   add rdi,OFFSET_CHUNK_TOTAL
   call _sbrk 
+
+  push rax 
+  lea rdi,[rel static_mutex_guard]
+  call mutex_lock
+  pop rax 
 
   ; rax (void *) from ptr 
   test rax,rax 
@@ -307,11 +326,35 @@ init_page:
   push rbp 
   mov rbp,rsp 
 
-  lea rax,[rel static_head_break_offset]
-  mov rax,ARENA_METADATA
+  mov rax,SYS_mmap
+  xor rdi,rdi 
+  mov rsi,ARENA_INIT_PAGE + ARENA_METADATA_size 
+  mov rdx,PROT_READ | PROT_WRITE
+  mov r10,MAP_PRIVATE | MAP_ANONYMOUS
+  mov r8,-1 
+  xor r9,r9
+  syscall 
+
+  cmp rax,-1 
+  je .INIT_ERR 
+
+  xor rdx,rdx 
+  mov qword [rax + ARENA_METADATA.size_arena],ARENA_INIT_PAGE ;; size_t u64 
+  mov qword [rax + ARENA_METADATA.next_arena],rdx 
+  mov dword [rax + ARENA_METADATA.flags_arena],FLAGS_ARENA_USED 
+  mov dword [rax + ARENA_METADATA.hash_arena],0 
+
+  mov qword [rax + ARENA_METADATA.static_head_multiarena],rdx 
+  mov qword [rax + ARENA_METADATA.static_tail_multiarena],rdx
+
+  lea rax,[rax + ARENA_METADATA_size]
 
   leave 
-  ret 
+  ret ;; return arena metadata + offset chunk 
+
+.INIT_ERR:
+
+  ud2
 
 page_alloc:
 

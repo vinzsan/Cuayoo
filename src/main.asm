@@ -1,33 +1,107 @@
+%include "include/standard.inc"
+%include "include/memory.inc"
+%include "include/mutex.inc"
+
+struc VECTOR_CONTEXT 
+  .data_ptr resq 1 
+  .capacity resq 1
+  .size     resq 1
+endstruc
+
 section .rodata
-  L1 db "float: ",0 
+  L1 db "Test",0x0A,0 
 
 section .text 
   global _start
 
-_itoa:
+init_vector:
 
   push rbp 
   mov rbp,rsp 
 
-  ; rdi buffer 
-  ; rsi number 
   push rbx 
-  push r12 
-
   mov rbx,rdi 
-  mov r12,rsi 
 
-  mov byte [rbx],0 
-  mov byte [rbx + 1],0x0A
+  mov qword [rbx + VECTOR_CONTEXT.capacity],8
+  mov qword [rbx + VECTOR_CONTEXT.size],0 
 
-  test r12,r12 
-  jnz .iter 
+  mov rdi,16
+  call alloc 
 
-  mov rax,1 
+  mov qword [rbx + VECTOR_CONTEXT.data_ptr],rax 
+  pop rbx 
+
   leave 
   ret 
 
-.iter: 
+;;
+
+vector_push:
+
+  push rbp 
+  mov rbp,rsp 
+  push rbx
+
+  push rsi ;; backup data 
+  mov rbx,rdi 
+
+  mov rax,[rdi + VECTOR_CONTEXT.size]
+  cmp rax,[rdi + VECTOR_CONTEXT.capacity]
+  jnz .DONE
+
+.NEW_MEMBER:
+
+  push r12 
+
+  mov rax,[rbx + VECTOR_CONTEXT.capacity]
+  mov rcx,2  
+  mul rcx 
+
+  push rax ;; new size backup 
+
+  mov rcx,8
+  mul rcx 
+
+  mov rdi,rax 
+  call alloc 
+
+  mov r12,rax 
+
+  mov rdx,[rbx + VECTOR_CONTEXT.data_ptr]
+  push rdx ;; ptr backup 
+
+  xor rcx,rcx 
+
+.FOR:
+
+  cmp rcx,[rbx + VECTOR_CONTEXT.size]
+  jge .BREAK
+
+  mov rax,qword [rdx + rcx * 8]
+  mov qword [r12 + rcx * 8],rax
+
+  inc rcx 
+  jmp .FOR 
+
+.BREAK:
+
+  pop rdi 
+  call free 
+
+  mov qword [rbx + VECTOR_CONTEXT.data_ptr],r12 
+  pop rax 
+  mov qword [rbx + VECTOR_CONTEXT.capacity],rax 
+
+  pop r12 
+  
+.DONE:
+
+  pop rsi 
+
+  mov qword [rbx + VECTOR_CONTEXT.data_ptr],rsi 
+  inc qword [rbx + VECTOR_CONTEXT.size]
+
+  pop rbx 
 
   leave 
   ret 
@@ -37,78 +111,43 @@ _start:
   and rsp,-16 
   xor rbp,rbp 
 
-  mov rdi,128
-  call alloc 
-
-  mov dword [rax + 4],0x41280000 
-  mov dword [rax + 8],0x41280000
-
-  movss xmm0,[rax + 4]
-  movss xmm1,[rax + 8]
-  addss xmm0,xmm1 
-
-  mov dword [rax + 16],0x42c80000 
-  mulss xmm0,[rax + 16]
-  cvtss2si r12,xmm0 
-
-  push rax 
-
-  mov rdi,r12 
-  lea rsi,[rax + 32]
-  call itoa64
-
-  lea rdi,[rel L1]
-  call print 
-
-  pop rax 
-  push rax 
-
-  add byte [rax + 32],0
-  lea rdi,[rax + 32]
-  call print
-
-  pop rdi 
-  call free 
-
-  mov rdi,16 
-  call alloc 
-
-  mov r12,rax 
-
-  mov qword [r12],3
-  mov qword [r12 + 8],0 
+  push rbp 
+  mov rbp,rsp 
+  sub rsp,64 
 
   push rbx 
-  mov ebx,10 
+  xor rdx,rdx 
+  mov rdx,10
 
-for:
+.iter:
 
-  test ebx,ebx 
-  jz .done
+  cmp rdx,0 
+  je .done 
 
-  mov rax,230 
-  xor rdi,rdi 
-  xor rsi,rsi 
-  lea rdx,[r12]
-  xor r10,r10 
-  syscall 
-  
-  mov rdi,1024 * 1024 * 10
-  movzx rbx,ebx 
-  imul rdi,rbx
-  call alloc
+  push rdx  
+  mov rdi,1024
+  call alloc 
 
-  dec ebx 
-  jmp for 
+  mov rbx,rax 
+ 
+  mov rdi,rbx 
+  xor al,al
+  mov rcx,1024
+  cld 
+  rep stosb
+  pop rdx 
+
+  mov rdi,rbx 
+  call free
+
+  dec rdx 
+  jmp .iter 
 
 .done:
 
   pop rbx 
-
+  leave 
+  
   mov rax,60
   xor rdi,rdi 
   syscall
-
-%include "include/standard.inc"
-%include "include/memory.inc"
-  
